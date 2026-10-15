@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Admin | GCRobbie's Marketplace</title>
+<link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@600;800&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:light;--bg:#e9e3ff;--card:#fff;--ink:#1b1140;--muted:#5d5486;--line:#1b1140;--brand:#ffc928;--accent:#7c3cff;--chip:#efeaff;--bad:#c0392b;--ok:#1f9d55}
+@media (prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#1a1040;--card:#2a1b66;--ink:#fff7da;--muted:#b9acf0;--line:#0c0624;--accent:#a77bff;--chip:#3a2a85;--bad:#ff7b6b;--ok:#4fd88a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:600 16px/1.5 'Nunito',system-ui,sans-serif}
+h1,h2,h3,button{font-family:'Lilita One','Arial Black',sans-serif;font-weight:400}
+.wrap{max-width:1000px;margin:0 auto;padding:24px 18px 60px}
+h1{font-size:2.2rem;margin:0 0 4px;color:var(--brand);text-shadow:2px 2px 0 var(--line)}
+.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.btn{padding:9px 16px;border:3px solid var(--line);border-radius:12px;background:var(--brand);color:#1b1140;font-size:1rem;cursor:pointer;box-shadow:0 3px 0 var(--line)}
+.btn.ok{background:var(--ok);color:#fff}.btn.bad{background:var(--bad);color:#fff}.btn.plain{background:var(--card);color:var(--ink)}
+.tabs{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap}
+.tabs button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.item{background:var(--card);border:3px solid var(--line);border-radius:18px;padding:14px 16px;margin-bottom:16px}
+.item h3{margin:0;font-size:1.3rem}
+.prices{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.chip{background:var(--chip);border-radius:8px;padding:2px 10px;font-weight:800;font-size:.9rem}
+.chip.hi{background:var(--accent);color:#fff}
+.pics{display:flex;gap:8px;overflow-x:auto;padding:6px 0}
+.pics img{height:110px;border:3px solid var(--line);border-radius:10px;display:block}
+.acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.desc{white-space:pre-line;color:var(--muted);margin:6px 0}
+.msg{color:var(--bad);font-weight:800}
+#gate{text-align:center;padding-top:60px}
+:focus-visible{outline:4px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><h1>GCRobbie's Marketplace: Admin</h1><div id="who"></div></div>
+
+  <div id="gate">
+    <p>Sign in with the admin account to review listings.</p>
+    <button class="btn" id="signin">Sign in with Google</button>
+    <p class="msg" id="gmsg"></p>
+  </div>
+
+  <div id="panel" hidden>
+    <div class="tabs" id="tabs">
+      <button class="btn plain" data-s="pending" aria-pressed="true">Pending</button>
+      <button class="btn plain" data-s="approved" aria-pressed="false">Live</button>
+      <button class="btn plain" data-s="sold" aria-pressed="false">Sold</button>
+    </div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, getDocs, doc, updateDoc, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+/* ===== SETTINGS: same Firebase config as the other sites ===== */
+const FIREBASE = { apiKey:"YOUR_API_KEY", authDomain:"YOUR_PROJECT.firebaseapp.com", projectId:"YOUR_PROJECT", appId:"YOUR_APP_ID" };
+const CURRENCY = "$";
+/* The real protection is in firestore.rules (only your UID can read pending listings or edit anything). */
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = n => CURRENCY + Number(n || 0).toLocaleString();
+const app = initializeApp(FIREBASE), auth = getAuth(app), db = getFirestore(app);
+let tab = "pending", items = [], priv = {};
+
+$("#signin").onclick = async () => {
+  try { await signInWithPopup(auth, new GoogleAuthProvider()); }
+  catch (e) { $("#gmsg").textContent = "Sign-in failed. Check that this site's domain is in Firebase Authorized domains."; }
+};
+onAuthStateChanged(auth, async u => {
+  $("#gate").hidden = !!u; $("#panel").hidden = !u;
+  $("#who").innerHTML = u ? `<span class="chip">${esc(u.email)}</span> <button class="btn plain" id="out">Sign out</button>` : "";
+  if (u) { $("#out").onclick = () => signOut(auth); await load(); }
+});
+
+async function load(){
+  $("#list").innerHTML = "<p>Loading...</p>";
+  try {
+    const [a, b] = await Promise.all([getDocs(collection(db, "listings")), getDocs(collection(db, "private"))]);
+    items = a.docs.map(d => ({ id: d.id, ...d.data() }));
+    priv = {}; b.forEach(d => priv[d.id] = d.data());
+    items.sort((x, y) => (y.createdAt?.toMillis?.() || 0) - (x.createdAt?.toMillis?.() || 0));
+    draw();
+  } catch (e) {
+    console.error(e);
+    $("#list").innerHTML = `<p class="msg">You're not allowed to read listings. Make sure your UID is in firestore.rules.</p>`;
+  }
+}
+
+function draw(){
+  document.querySelectorAll("#tabs button").forEach(b => {
+    const n = items.filter(i => i.status === b.dataset.s).length;
+    b.textContent = ({pending:"Pending",approved:"Live",sold:"Sold"})[b.dataset.s] + " (" + n + ")";
+    b.setAttribute("aria-pressed", b.dataset.s === tab);
+  });
+  const list = items.filter(i => i.status === tab);
+  $("#list").innerHTML = list.length ? list.map(i => {
+    const sp = priv[i.id]?.sellerPrice;
+    const a = {
+      pending: `<button class="btn ok" data-a="approved" data-id="${i.id}">Approve</button><button class="btn bad" data-a="delete" data-id="${i.id}">Reject and delete</button>`,
+      approved: `<button class="btn" data-a="sold" data-id="${i.id}">Mark sold</button><button class="btn plain" data-a="pending" data-id="${i.id}">Unpublish</button>`,
+      sold: `<button class="btn plain" data-a="approved" data-id="${i.id}">Relist</button><button class="btn bad" data-a="delete" data-id="${i.id}">Delete</button>`
+    }[tab];
+    return `<div class="item">
+      <h3>${esc(i.title)}</h3>
+      <div class="prices">
+        <span class="chip">Seller price ${sp != null ? money(sp) : "unknown"}</span>
+        <span class="chip hi">Listed at ${money(i.price)}${sp ? " (" + (i.price / sp).toFixed(1) + "x)" : ""}</span>
+        <span class="chip">${esc(i.rank)}</span><span class="chip">${Number(i.trophies || 0).toLocaleString()} trophies</span>
+        <span class="chip">${i.brawlers || 0} brawlers</span><span class="chip">${i.legendaries || 0} legendaries</span>
+        <span class="chip">${i.skins || 0} skins</span><span class="chip">${i.gems || 0} gems</span>
+      </div>
+      <div class="pics">${(i.images || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Listing photo" loading="lazy"></a>`).join("")}</div>
+      <div class="desc">${esc(i.description)}</div>
+      <div class="acts">${a}</div></div>`;
+  }).join("") : `<p>Nothing here.</p>`;
+}
+
+$("#tabs").onclick = e => { const b = e.target.closest("button"); if (b) { tab = b.dataset.s; draw(); } };
+$("#list").onclick = async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  const id = b.dataset.id, act = b.dataset.a; b.disabled = true;
+  try {
+    if (act === "delete") {
+      if (!confirm("Delete this listing for good?")) { b.disabled = false; return; }
+      const w = writeBatch(db); w.delete(doc(db, "listings", id)); w.delete(doc(db, "private", id)); await w.commit();
+    } else await updateDoc(doc(db, "listings", id), { status: act });
+    await load();
+  } catch (err) { console.error(err); alert("That didn't work. Check your rules and sign-in."); b.disabled = false; }
+};
+</script>
+</body>
+</html>
